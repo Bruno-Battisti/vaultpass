@@ -19,8 +19,34 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Run tests
+      # Testcontainers uses the Docker daemon already available on the
+      # ubuntu-latest runner directly — no services: block needed here.
+      - name: Build, unit test and integration test
         run: ./mvnw -B verify
 
-      - name: Build jar
-        run: ./mvnw -B package -DskipTests
+      - name: Publish test report
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Maven Tests
+          path: '**/surefire-reports/*.xml,**/failsafe-reports/*.xml'
+          reporter: java-junit
+
+      - name: Upload jar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vaultpass-jar
+          path: target/*.jar
+
+  docker-build:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image (validate only, no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: vaultpass:ci
