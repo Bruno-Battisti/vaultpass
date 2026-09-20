@@ -73,8 +73,8 @@ class VaultControllerIT {
     void crudLifecycle_createListGetUpdateDeletePassword() throws Exception {
         String token = registerAndLogin("vault-owner@example.com");
 
-        CredentialCreateRequest createRequest =
-                new CredentialCreateRequest("GitHub", "bruno", "s3cr3t-P@ss1", "https://github.com", "main account");
+        CredentialCreateRequest createRequest = new CredentialCreateRequest(
+                "GitHub", "bruno", "s3cr3t-P@ss1", "https://github.com", "main account", null);
         MvcResult createResult = mockMvc.perform(post("/api/v1/vault")
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -99,8 +99,8 @@ class VaultControllerIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.password").value("s3cr3t-P@ss1"));
 
-        CredentialUpdateRequest updateRequest =
-                new CredentialUpdateRequest("GitHub Updated", "bruno2", null, "https://github.com", "updated notes");
+        CredentialUpdateRequest updateRequest = new CredentialUpdateRequest(
+                "GitHub Updated", "bruno2", null, "https://github.com", "updated notes", null);
         mockMvc.perform(put("/api/v1/vault/" + created.id())
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -125,7 +125,8 @@ class VaultControllerIT {
         String tokenA = registerAndLogin("owner-a@example.com");
         String tokenB = registerAndLogin("owner-b@example.com");
 
-        CredentialCreateRequest createRequest = new CredentialCreateRequest("Bank", "a", "s3cr3t-P@ss1", null, null);
+        CredentialCreateRequest createRequest =
+                new CredentialCreateRequest("Bank", "a", "s3cr3t-P@ss1", null, null, null);
         MvcResult createResult = mockMvc.perform(post("/api/v1/vault")
                         .header("Authorization", "Bearer " + tokenA)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -151,10 +152,72 @@ class VaultControllerIT {
 
     @Test
     void create_withoutAuthentication_returnsUnauthorized() throws Exception {
-        CredentialCreateRequest createRequest = new CredentialCreateRequest("GitHub", "bruno", "s3cr3t-P@ss1", null, null);
+        CredentialCreateRequest createRequest =
+                new CredentialCreateRequest("GitHub", "bruno", "s3cr3t-P@ss1", null, null, null);
         mockMvc.perform(post("/api/v1/vault")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(createRequest)))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void create_withCategoryFromAnotherUser_returnsNotFound() throws Exception {
+        String tokenA = registerAndLogin("cat-cred-owner-a@example.com");
+        String tokenB = registerAndLogin("cat-cred-owner-b@example.com");
+
+        MvcResult categoriesResult = mockMvc.perform(get("/api/v1/categories").header("Authorization", "Bearer " + tokenB))
+                .andExpect(status().isOk())
+                .andReturn();
+        String categoryIdOfUserB = com.jayway.jsonpath.JsonPath.read(
+                categoriesResult.getResponse().getContentAsString(), "$[0].id");
+
+        CredentialCreateRequest createRequest = new CredentialCreateRequest(
+                "GitHub", "bruno", "s3cr3t-P@ss1", null, null, java.util.UUID.fromString(categoryIdOfUserB));
+        mockMvc.perform(post("/api/v1/vault")
+                        .header("Authorization", "Bearer " + tokenA)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(createRequest)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void list_filtersBySearchTermAndCategoryId() throws Exception {
+        String token = registerAndLogin("vault-search@example.com");
+
+        MvcResult categoriesResult = mockMvc.perform(get("/api/v1/categories").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn();
+        java.util.List<String> devCategoryIds = com.jayway.jsonpath.JsonPath.read(
+                categoriesResult.getResponse().getContentAsString(), "$[?(@.name == 'DESENVOLVIMENTO')].id");
+        String devCategoryId = devCategoryIds.get(0);
+
+        mockMvc.perform(post("/api/v1/vault")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new CredentialCreateRequest(
+                                "GitHub", "bruno", "s3cr3t-P@ss1", null, null,
+                                java.util.UUID.fromString(devCategoryId)))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/vault")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new CredentialCreateRequest(
+                                "Netflix", "bruno", "s3cr3t-P@ss1", null, null, null))))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/api/v1/vault?search=git").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].title").value("GitHub"));
+
+        mockMvc.perform(get("/api/v1/vault?categoryId=" + devCategoryId).header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].title").value("GitHub"));
+
+        mockMvc.perform(get("/api/v1/vault?search=nomatch").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page.totalElements").value(0));
     }
 }

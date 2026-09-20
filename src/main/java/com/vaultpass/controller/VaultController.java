@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -39,8 +40,10 @@ public class VaultController {
 
     @GetMapping
     public ResponseEntity<PagedModel<CredentialResponse>> list(@AuthenticationPrincipal CustomUserPrincipal principal,
+                                                                 @RequestParam(required = false) String search,
+                                                                 @RequestParam(required = false) UUID categoryId,
                                                                  @PageableDefault(size = 20) Pageable pageable) {
-        return ResponseEntity.ok(new PagedModel<>(vaultService.list(principal.getUserId(), pageable)));
+        return ResponseEntity.ok(new PagedModel<>(vaultService.list(principal.getUserId(), search, categoryId, pageable)));
     }
 
     @GetMapping("/{id}")

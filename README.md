@@ -9,7 +9,7 @@ API REST de gerenciamento seguro de senhas em Java + Spring Boot, com cofre priv
 - [x] Base de infraestrutura (Fase 1)
 - [x] Cadastro, login e JWT (Fase 2)
 - [x] Cofre de credenciais (CRUD + criptografia AES-256-GCM) (Fase 3)
-- [ ] Categorias, gerador de senhas e busca (Fase 4)
+- [x] Categorias, gerador de senhas e busca (Fase 4)
 - [ ] Refresh token persistido, rate limiting e auditoria (Fase 5)
 - [ ] 2FA (TOTP), sessões e detecção de atividade suspeita (Fase 6)
 - [ ] Deploy, CI/CD e documentação final (Fase 7)
@@ -106,6 +106,34 @@ curl -X DELETE -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/v
 ```
 
 A senha é cifrada com AES-256-GCM (IV aleatório por registro) antes de ir para o banco — nunca trafega em claro em `GET /vault` ou `GET /vault/{id}`, só no endpoint dedicado `/password`. Tentar acessar a credencial de outro usuário retorna `404` (nunca `403`, para não confirmar a um atacante que o ID existe).
+
+### Categorias (Fase 4)
+
+Toda conta nova recebe automaticamente 7 categorias padrão (`SOCIAL, TRABALHO, ESTUDOS, FINANCEIRO, JOGOS, DESENVOLVIMENTO, OUTROS`).
+
+```bash
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/categories
+curl -X POST http://localhost:8080/api/v1/categories -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{"name":"Streaming"}'
+curl -X PUT http://localhost:8080/api/v1/categories/{id} -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d '{"name":"Streaming Renomeado"}'
+curl -X DELETE -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/categories/{id}
+```
+
+Uma credencial pode ser associada a uma categoria via `categoryId` no corpo de `POST`/`PUT /vault`. Usar o ID de uma categoria de outro usuário retorna `404`.
+
+### Gerador de senhas e busca (Fase 4)
+
+```bash
+# Gerar senha (SecureRandom, nunca java.util.Random)
+curl -X POST http://localhost:8080/api/v1/password/generate -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"length":24,"uppercase":true,"lowercase":true,"numbers":true,"symbols":true}'
+
+# Calcular força (sempre POST, nunca GET — senha nunca vai para a URL/logs)
+curl -X POST http://localhost:8080/api/v1/password/strength -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"password":"Xk9#mQ2$vLp8@wRt"}'
+
+# Buscar no cofre por título/usuário e/ou filtrar por categoria
+curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/v1/vault?search=github&categoryId={id}"
+```
 
 ## Security
 

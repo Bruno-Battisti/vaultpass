@@ -37,6 +37,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final UserMapper userMapper;
+    private final CategoryService categoryService;
 
     private String dummyPasswordHash;
 
@@ -57,7 +58,9 @@ public class AuthService {
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .build();
 
-        return userMapper.toSummary(userRepository.save(user));
+        User saved = userRepository.save(user);
+        categoryService.seedDefaultCategories(saved.getId());
+        return userMapper.toSummary(saved);
     }
 
     @Transactional(readOnly = true)

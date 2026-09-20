@@ -13,8 +13,10 @@ import com.vaultpass.dto.credential.CredentialPasswordResponse;
 import com.vaultpass.dto.credential.CredentialResponse;
 import com.vaultpass.dto.credential.CredentialUpdateRequest;
 import com.vaultpass.dto.mapper.CredentialMapper;
+import com.vaultpass.entity.Category;
 import com.vaultpass.entity.Credential;
 import com.vaultpass.exception.ResourceNotFoundException;
+import com.vaultpass.repository.CategoryRepository;
 import com.vaultpass.repository.CredentialRepository;
 import java.time.Instant;
 import java.util.Optional;
@@ -33,6 +35,9 @@ class VaultServiceTest {
     private CredentialRepository credentialRepository;
 
     @Mock
+    private CategoryRepository categoryRepository;
+
+    @Mock
     private EncryptionService encryptionService;
 
     @Mock
@@ -44,7 +49,7 @@ class VaultServiceTest {
     @Test
     void create_encryptsPasswordBeforeSaving() {
         UUID userId = UUID.randomUUID();
-        CredentialCreateRequest request = new CredentialCreateRequest("GitHub", "bruno", "s3cr3t", "https://github.com", null);
+        CredentialCreateRequest request = new CredentialCreateRequest("GitHub", "bruno", "s3cr3t", "https://github.com", null, null);
         when(encryptionService.encrypt("s3cr3t")).thenReturn("cipher-text");
 
         Credential saved = Credential.builder().id(UUID.randomUUID()).userId(userId).title("GitHub")
@@ -92,7 +97,7 @@ class VaultServiceTest {
         UUID credentialId = UUID.randomUUID();
         Credential existing = Credential.builder().id(credentialId).userId(userId).title("Old")
                 .encryptedPassword("old-cipher").build();
-        CredentialUpdateRequest request = new CredentialUpdateRequest("New Title", "bruno", null, null, null);
+        CredentialUpdateRequest request = new CredentialUpdateRequest("New Title", "bruno", null, null, null, null);
         when(credentialRepository.findByIdAndUserId(credentialId, userId)).thenReturn(Optional.of(existing));
         when(credentialRepository.save(any(Credential.class))).thenAnswer(inv -> inv.getArgument(0));
         CredentialResponse expected = new CredentialResponse(credentialId, "New Title", "bruno", null, null, null,
@@ -113,7 +118,7 @@ class VaultServiceTest {
         UUID credentialId = UUID.randomUUID();
         Credential existing = Credential.builder().id(credentialId).userId(userId).title("Old")
                 .encryptedPassword("old-cipher").build();
-        CredentialUpdateRequest request = new CredentialUpdateRequest("Old", null, "new-password", null, null);
+        CredentialUpdateRequest request = new CredentialUpdateRequest("Old", null, "new-password", null, null, null);
         when(credentialRepository.findByIdAndUserId(credentialId, userId)).thenReturn(Optional.of(existing));
         when(encryptionService.encrypt("new-password")).thenReturn("new-cipher");
         when(credentialRepository.save(any(Credential.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -147,5 +152,38 @@ class VaultServiceTest {
 
         assertThrows(ResourceNotFoundException.class, () -> vaultService.delete(userId, credentialId));
         verify(credentialRepository, never()).delete(any());
+    }
+
+    @Test
+    void create_withCategoryNotOwnedByUser_throwsResourceNotFound() {
+        UUID userId = UUID.randomUUID();
+        UUID foreignCategoryId = UUID.randomUUID();
+        CredentialCreateRequest request =
+                new CredentialCreateRequest("GitHub", "bruno", "s3cr3t", null, null, foreignCategoryId);
+        when(categoryRepository.findByIdAndUserId(foreignCategoryId, userId)).thenReturn(Optional.empty());
+
+        assertThrows(ResourceNotFoundException.class, () -> vaultService.create(userId, request));
+        verify(credentialRepository, never()).save(any());
+    }
+
+    @Test
+    void create_withOwnedCategory_associatesCredentialToCategory() {
+        UUID userId = UUID.randomUUID();
+        UUID categoryId = UUID.randomUUID();
+        CredentialCreateRequest request =
+                new CredentialCreateRequest("GitHub", "bruno", "s3cr3t", null, null, categoryId);
+        when(categoryRepository.findByIdAndUserId(categoryId, userId))
+                .thenReturn(Optional.of(Category.builder().id(categoryId).userId(userId).build()));
+        when(encryptionService.encrypt("s3cr3t")).thenReturn("cipher-text");
+        when(credentialRepository.save(any(Credential.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(credentialMapper.toResponse(any(Credential.class))).thenReturn(
+                new CredentialResponse(UUID.randomUUID(), "GitHub", "bruno", null, null, categoryId, true,
+                        Instant.now(), Instant.now()));
+
+        vaultService.create(userId, request);
+
+        ArgumentCaptor<Credential> captor = ArgumentCaptor.forClass(Credential.class);
+        verify(credentialRepository).save(captor.capture());
+        assertThat(captor.getValue().getCategoryId()).isEqualTo(categoryId);
     }
 }

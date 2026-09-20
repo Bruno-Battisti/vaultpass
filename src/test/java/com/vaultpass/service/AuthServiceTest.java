@@ -51,12 +51,15 @@ class AuthServiceTest {
     @Mock
     private UserMapper userMapper;
 
+    @Mock
+    private CategoryService categoryService;
+
     private AuthService authService;
 
     @BeforeEach
     void setUp() {
         when(passwordEncoder.encode(anyString())).thenReturn("dummy-hash");
-        authService = new AuthService(userRepository, passwordEncoder, jwtService, userMapper);
+        authService = new AuthService(userRepository, passwordEncoder, jwtService, userMapper, categoryService);
         ReflectionTestUtils.invokeMethod(authService, "init");
     }
 
@@ -77,6 +80,7 @@ class AuthServiceTest {
 
         assertThat(result).isEqualTo(expected);
         verify(userRepository).save(any(User.class));
+        verify(categoryService).seedDefaultCategories(saved.getId());
     }
 
     @Test
