@@ -130,4 +130,89 @@ class AuthControllerIT {
                         .content(objectMapper.writeValueAsString(registerRequest)))
                 .andExpect(status().isBadRequest());
     }
+
+    @Test
+    void login_fifthConsecutiveFailure_locksAccount() throws Exception {
+        RegisterRequest registerRequest = new RegisterRequest("Bruno", "lockout@example.com", "SenhaForte123!");
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(registerRequest)))
+                .andExpect(status().isCreated());
+
+        LoginRequest wrongLogin = new LoginRequest("lockout@example.com", "SenhaErrada123!");
+        for (int i = 0; i < 4; i++) {
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(wrongLogin)))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        // 5th failure locks the account.
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(wrongLogin)))
+                .andExpect(status().isUnauthorized());
+
+        // Even with the correct password, the account is now locked.
+        LoginRequest correctLogin = new LoginRequest("lockout@example.com", "SenhaForte123!");
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(correctLogin)))
+                .andExpect(status().isLocked());
+    }
+
+    @Test
+    void refresh_reusingAlreadyRotatedToken_isRejectedAndKillsTheSession() throws Exception {
+        RegisterRequest registerRequest = new RegisterRequest("Bruno", "rotation@example.com", "SenhaForte123!");
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(registerRequest)))
+                .andExpect(status().isCreated());
+
+        MvcResult loginResult = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("rotation@example.com", "SenhaForte123!"))))
+                .andExpect(status().isOk())
+                .andReturn();
+        AuthResponse authResponse = objectMapper.readValue(loginResult.getResponse().getContentAsString(), AuthResponse.class);
+        String originalRefreshToken = authResponse.refreshToken();
+
+        // First refresh rotates the token — this must succeed.
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new RefreshTokenRequest(originalRefreshToken))))
+                .andExpect(status().isOk());
+
+        // Reusing the now-revoked original token is treated as theft.
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new RefreshTokenRequest(originalRefreshToken))))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void logout_revokesRefreshTokenSoItCanNoLongerBeUsed() throws Exception {
+        RegisterRequest registerRequest = new RegisterRequest("Bruno", "logout@example.com", "SenhaForte123!");
+        mockMvc.perform(post("/api/v1/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(registerRequest)))
+                .andExpect(status().isCreated());
+
+        MvcResult loginResult = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("logout@example.com", "SenhaForte123!"))))
+                .andExpect(status().isOk())
+                .andReturn();
+        AuthResponse authResponse = objectMapper.readValue(loginResult.getResponse().getContentAsString(), AuthResponse.class);
+
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new RefreshTokenRequest(authResponse.refreshToken()))))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new RefreshTokenRequest(authResponse.refreshToken()))))
+                .andExpect(status().isUnauthorized());
+    }
 }

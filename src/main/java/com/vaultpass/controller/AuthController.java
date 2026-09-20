@@ -7,8 +7,11 @@ import com.vaultpass.dto.auth.RefreshTokenRequest;
 import com.vaultpass.dto.auth.RegisterRequest;
 import com.vaultpass.dto.auth.UserSummaryResponse;
 import com.vaultpass.service.AuthService;
+import com.vaultpass.util.ClientIpResolver;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final ClientIpResolver clientIpResolver;
 
     @PostMapping("/register")
     public ResponseEntity<UserSummaryResponse> register(@Valid @RequestBody RegisterRequest request) {
@@ -29,12 +33,22 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-        return ResponseEntity.ok(authService.login(request));
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
+        return ResponseEntity.ok(authService.login(request, clientIpResolver.resolve(httpRequest), userAgent(httpRequest)));
     }
 
     @PostMapping("/refresh")
-    public ResponseEntity<RefreshResponse> refresh(@Valid @RequestBody RefreshTokenRequest request) {
-        return ResponseEntity.ok(authService.refresh(request));
+    public ResponseEntity<RefreshResponse> refresh(@Valid @RequestBody RefreshTokenRequest request, HttpServletRequest httpRequest) {
+        return ResponseEntity.ok(authService.refresh(request, clientIpResolver.resolve(httpRequest), userAgent(httpRequest)));
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@Valid @RequestBody RefreshTokenRequest request, HttpServletRequest httpRequest) {
+        authService.logout(request, clientIpResolver.resolve(httpRequest), userAgent(httpRequest));
+        return ResponseEntity.noContent().build();
+    }
+
+    private String userAgent(HttpServletRequest request) {
+        return request.getHeader(HttpHeaders.USER_AGENT);
     }
 }

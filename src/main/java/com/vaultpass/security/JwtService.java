@@ -12,11 +12,14 @@ import java.util.UUID;
 import javax.crypto.SecretKey;
 import org.springframework.stereotype.Service;
 
+/**
+ * Issues and validates access tokens only. Refresh tokens are opaque,
+ * persisted, single-use values managed by RefreshTokenService — not JWTs —
+ * so a refresh token can never be mistaken for a valid access token here.
+ */
 @Service
 public class JwtService {
 
-    private static final String CLAIM_TYPE = "type";
-    private static final String TYPE_REFRESH = "refresh";
     private static final int MIN_KEY_BYTES = 32;
 
     private final JwtProperties properties;
@@ -33,11 +36,16 @@ public class JwtService {
     }
 
     public String generateAccessToken(User user) {
-        return buildToken(user, Duration.ofMinutes(properties.accessTokenExpirationMinutes()), null);
-    }
-
-    public String generateRefreshToken(User user) {
-        return buildToken(user, Duration.ofDays(properties.refreshTokenExpirationDays()), TYPE_REFRESH);
+        Instant now = Instant.now();
+        Duration ttl = Duration.ofMinutes(properties.accessTokenExpirationMinutes());
+        return Jwts.builder()
+                .subject(user.getId().toString())
+                .claim("email", user.getEmail())
+                .claim("role", user.getRole().name())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plus(ttl)))
+                .signWith(signingKey)
+                .compact();
     }
 
     public long getAccessTokenExpirationSeconds() {
@@ -52,26 +60,7 @@ public class JwtService {
                 .getPayload();
     }
 
-    public boolean isRefreshToken(Claims claims) {
-        return TYPE_REFRESH.equals(claims.get(CLAIM_TYPE, String.class));
-    }
-
     public UUID extractUserId(Claims claims) {
         return UUID.fromString(claims.getSubject());
-    }
-
-    private String buildToken(User user, Duration ttl, String type) {
-        Instant now = Instant.now();
-        var builder = Jwts.builder()
-                .subject(user.getId().toString())
-                .claim("email", user.getEmail())
-                .claim("role", user.getRole().name())
-                .issuedAt(Date.from(now))
-                .expiration(Date.from(now.plus(ttl)))
-                .signWith(signingKey);
-        if (type != null) {
-            builder.claim(CLAIM_TYPE, type);
-        }
-        return builder.compact();
     }
 }

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -13,6 +14,7 @@ import com.vaultpass.dto.credential.CredentialPasswordResponse;
 import com.vaultpass.dto.credential.CredentialResponse;
 import com.vaultpass.dto.credential.CredentialUpdateRequest;
 import com.vaultpass.dto.mapper.CredentialMapper;
+import com.vaultpass.entity.AuditEventType;
 import com.vaultpass.entity.Category;
 import com.vaultpass.entity.Credential;
 import com.vaultpass.exception.ResourceNotFoundException;
@@ -31,6 +33,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class VaultServiceTest {
 
+    private static final String IP = "203.0.113.5";
+    private static final String USER_AGENT = "junit-agent";
+
     @Mock
     private CredentialRepository credentialRepository;
 
@@ -42,6 +47,9 @@ class VaultServiceTest {
 
     @Mock
     private CredentialMapper credentialMapper;
+
+    @Mock
+    private AuditService auditService;
 
     @InjectMocks
     private VaultService vaultService;
@@ -60,13 +68,14 @@ class VaultServiceTest {
                 null, null, true, Instant.now(), Instant.now());
         when(credentialMapper.toResponse(saved)).thenReturn(expected);
 
-        CredentialResponse result = vaultService.create(userId, request);
+        CredentialResponse result = vaultService.create(userId, request, IP, USER_AGENT);
 
         assertThat(result).isEqualTo(expected);
         ArgumentCaptor<Credential> captor = ArgumentCaptor.forClass(Credential.class);
         verify(credentialRepository).save(captor.capture());
         assertThat(captor.getValue().getEncryptedPassword()).isEqualTo("cipher-text");
         assertThat(captor.getValue().getUserId()).isEqualTo(userId);
+        verify(auditService).record(eq(AuditEventType.PASSWORD_CREATED), eq(userId), eq(IP), eq(USER_AGENT), anyString());
     }
 
     @Test
@@ -79,16 +88,18 @@ class VaultServiceTest {
     }
 
     @Test
-    void revealPassword_decryptsStoredValue() {
+    void revealPassword_decryptsStoredValueAndRecordsAudit() {
         UUID userId = UUID.randomUUID();
         UUID credentialId = UUID.randomUUID();
-        Credential credential = Credential.builder().id(credentialId).userId(userId).encryptedPassword("cipher-text").build();
+        Credential credential = Credential.builder().id(credentialId).userId(userId).title("GitHub")
+                .encryptedPassword("cipher-text").build();
         when(credentialRepository.findByIdAndUserId(credentialId, userId)).thenReturn(Optional.of(credential));
         when(encryptionService.decrypt("cipher-text")).thenReturn("s3cr3t");
 
-        CredentialPasswordResponse response = vaultService.revealPassword(userId, credentialId);
+        CredentialPasswordResponse response = vaultService.revealPassword(userId, credentialId, IP, USER_AGENT);
 
         assertThat(response.password()).isEqualTo("s3cr3t");
+        verify(auditService).record(eq(AuditEventType.PASSWORD_VIEWED), eq(userId), eq(IP), eq(USER_AGENT), anyString());
     }
 
     @Test
@@ -104,12 +115,13 @@ class VaultServiceTest {
                 true, Instant.now(), Instant.now());
         when(credentialMapper.toResponse(any(Credential.class))).thenReturn(expected);
 
-        vaultService.update(userId, credentialId, request);
+        vaultService.update(userId, credentialId, request, IP, USER_AGENT);
 
         ArgumentCaptor<Credential> captor = ArgumentCaptor.forClass(Credential.class);
         verify(credentialRepository).save(captor.capture());
         assertThat(captor.getValue().getEncryptedPassword()).isEqualTo("old-cipher");
         verify(encryptionService, never()).encrypt(anyString());
+        verify(auditService).record(eq(AuditEventType.PASSWORD_UPDATED), eq(userId), eq(IP), eq(USER_AGENT), anyString());
     }
 
     @Test
@@ -125,7 +137,7 @@ class VaultServiceTest {
         when(credentialMapper.toResponse(any(Credential.class))).thenReturn(
                 new CredentialResponse(credentialId, "Old", null, null, null, null, true, Instant.now(), Instant.now()));
 
-        vaultService.update(userId, credentialId, request);
+        vaultService.update(userId, credentialId, request, IP, USER_AGENT);
 
         ArgumentCaptor<Credential> captor = ArgumentCaptor.forClass(Credential.class);
         verify(credentialRepository).save(captor.capture());
@@ -133,15 +145,16 @@ class VaultServiceTest {
     }
 
     @Test
-    void delete_removesOwnedCredential() {
+    void delete_removesOwnedCredentialAndRecordsAudit() {
         UUID userId = UUID.randomUUID();
         UUID credentialId = UUID.randomUUID();
-        Credential existing = Credential.builder().id(credentialId).userId(userId).build();
+        Credential existing = Credential.builder().id(credentialId).userId(userId).title("GitHub").build();
         when(credentialRepository.findByIdAndUserId(credentialId, userId)).thenReturn(Optional.of(existing));
 
-        vaultService.delete(userId, credentialId);
+        vaultService.delete(userId, credentialId, IP, USER_AGENT);
 
         verify(credentialRepository).delete(existing);
+        verify(auditService).record(eq(AuditEventType.PASSWORD_DELETED), eq(userId), eq(IP), eq(USER_AGENT), anyString());
     }
 
     @Test
@@ -150,7 +163,7 @@ class VaultServiceTest {
         UUID credentialId = UUID.randomUUID();
         when(credentialRepository.findByIdAndUserId(credentialId, userId)).thenReturn(Optional.empty());
 
-        assertThrows(ResourceNotFoundException.class, () -> vaultService.delete(userId, credentialId));
+        assertThrows(ResourceNotFoundException.class, () -> vaultService.delete(userId, credentialId, IP, USER_AGENT));
         verify(credentialRepository, never()).delete(any());
     }
 
@@ -162,7 +175,7 @@ class VaultServiceTest {
                 new CredentialCreateRequest("GitHub", "bruno", "s3cr3t", null, null, foreignCategoryId);
         when(categoryRepository.findByIdAndUserId(foreignCategoryId, userId)).thenReturn(Optional.empty());
 
-        assertThrows(ResourceNotFoundException.class, () -> vaultService.create(userId, request));
+        assertThrows(ResourceNotFoundException.class, () -> vaultService.create(userId, request, IP, USER_AGENT));
         verify(credentialRepository, never()).save(any());
     }
 
@@ -180,7 +193,7 @@ class VaultServiceTest {
                 new CredentialResponse(UUID.randomUUID(), "GitHub", "bruno", null, null, categoryId, true,
                         Instant.now(), Instant.now()));
 
-        vaultService.create(userId, request);
+        vaultService.create(userId, request, IP, USER_AGENT);
 
         ArgumentCaptor<Credential> captor = ArgumentCaptor.forClass(Credential.class);
         verify(credentialRepository).save(captor.capture());

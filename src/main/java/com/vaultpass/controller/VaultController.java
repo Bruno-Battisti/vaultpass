@@ -6,12 +6,15 @@ import com.vaultpass.dto.credential.CredentialResponse;
 import com.vaultpass.dto.credential.CredentialUpdateRequest;
 import com.vaultpass.security.CustomUserPrincipal;
 import com.vaultpass.service.VaultService;
+import com.vaultpass.util.ClientIpResolver;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.data.web.PagedModel;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -31,11 +34,15 @@ import org.springframework.web.bind.annotation.RestController;
 public class VaultController {
 
     private final VaultService vaultService;
+    private final ClientIpResolver clientIpResolver;
 
     @PostMapping
     public ResponseEntity<CredentialResponse> create(@AuthenticationPrincipal CustomUserPrincipal principal,
-                                                       @Valid @RequestBody CredentialCreateRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(vaultService.create(principal.getUserId(), request));
+                                                       @Valid @RequestBody CredentialCreateRequest request,
+                                                       HttpServletRequest httpRequest) {
+        CredentialResponse response = vaultService.create(
+                principal.getUserId(), request, clientIpResolver.resolve(httpRequest), userAgent(httpRequest));
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
     @GetMapping
@@ -55,19 +62,30 @@ public class VaultController {
     @PutMapping("/{id}")
     public ResponseEntity<CredentialResponse> update(@AuthenticationPrincipal CustomUserPrincipal principal,
                                                        @PathVariable UUID id,
-                                                       @Valid @RequestBody CredentialUpdateRequest request) {
-        return ResponseEntity.ok(vaultService.update(principal.getUserId(), id, request));
+                                                       @Valid @RequestBody CredentialUpdateRequest request,
+                                                       HttpServletRequest httpRequest) {
+        CredentialResponse response = vaultService.update(
+                principal.getUserId(), id, request, clientIpResolver.resolve(httpRequest), userAgent(httpRequest));
+        return ResponseEntity.ok(response);
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@AuthenticationPrincipal CustomUserPrincipal principal, @PathVariable UUID id) {
-        vaultService.delete(principal.getUserId(), id);
+    public ResponseEntity<Void> delete(@AuthenticationPrincipal CustomUserPrincipal principal, @PathVariable UUID id,
+                                        HttpServletRequest httpRequest) {
+        vaultService.delete(principal.getUserId(), id, clientIpResolver.resolve(httpRequest), userAgent(httpRequest));
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/{id}/password")
     public ResponseEntity<CredentialPasswordResponse> revealPassword(@AuthenticationPrincipal CustomUserPrincipal principal,
-                                                                       @PathVariable UUID id) {
-        return ResponseEntity.ok(vaultService.revealPassword(principal.getUserId(), id));
+                                                                       @PathVariable UUID id,
+                                                                       HttpServletRequest httpRequest) {
+        CredentialPasswordResponse response = vaultService.revealPassword(
+                principal.getUserId(), id, clientIpResolver.resolve(httpRequest), userAgent(httpRequest));
+        return ResponseEntity.ok(response);
+    }
+
+    private String userAgent(HttpServletRequest request) {
+        return request.getHeader(HttpHeaders.USER_AGENT);
     }
 }

@@ -5,6 +5,7 @@ import com.vaultpass.dto.credential.CredentialPasswordResponse;
 import com.vaultpass.dto.credential.CredentialResponse;
 import com.vaultpass.dto.credential.CredentialUpdateRequest;
 import com.vaultpass.dto.mapper.CredentialMapper;
+import com.vaultpass.entity.AuditEventType;
 import com.vaultpass.entity.Credential;
 import com.vaultpass.exception.ResourceNotFoundException;
 import com.vaultpass.repository.CategoryRepository;
@@ -31,9 +32,10 @@ public class VaultService {
     private final CategoryRepository categoryRepository;
     private final EncryptionService encryptionService;
     private final CredentialMapper credentialMapper;
+    private final AuditService auditService;
 
     @Transactional
-    public CredentialResponse create(UUID userId, CredentialCreateRequest request) {
+    public CredentialResponse create(UUID userId, CredentialCreateRequest request, String ip, String userAgent) {
         validateCategoryOwnership(userId, request.categoryId());
 
         Credential credential = Credential.builder()
@@ -45,7 +47,9 @@ public class VaultService {
                 .url(request.url())
                 .notes(request.notes())
                 .build();
-        return credentialMapper.toResponse(credentialRepository.save(credential));
+        Credential saved = credentialRepository.save(credential);
+        auditService.record(AuditEventType.PASSWORD_CREATED, userId, ip, userAgent, "Credential '" + saved.getTitle() + "' created");
+        return credentialMapper.toResponse(saved);
     }
 
     @Transactional(readOnly = true)
@@ -59,7 +63,7 @@ public class VaultService {
     }
 
     @Transactional
-    public CredentialResponse update(UUID userId, UUID id, CredentialUpdateRequest request) {
+    public CredentialResponse update(UUID userId, UUID id, CredentialUpdateRequest request, String ip, String userAgent) {
         validateCategoryOwnership(userId, request.categoryId());
 
         Credential credential = findOwnedOrThrow(id, userId);
@@ -71,17 +75,22 @@ public class VaultService {
         if (request.password() != null && !request.password().isBlank()) {
             credential.setEncryptedPassword(encryptionService.encrypt(request.password()));
         }
-        return credentialMapper.toResponse(credentialRepository.save(credential));
+        Credential saved = credentialRepository.save(credential);
+        auditService.record(AuditEventType.PASSWORD_UPDATED, userId, ip, userAgent, "Credential '" + saved.getTitle() + "' updated");
+        return credentialMapper.toResponse(saved);
     }
 
     @Transactional
-    public void delete(UUID userId, UUID id) {
-        credentialRepository.delete(findOwnedOrThrow(id, userId));
+    public void delete(UUID userId, UUID id, String ip, String userAgent) {
+        Credential credential = findOwnedOrThrow(id, userId);
+        credentialRepository.delete(credential);
+        auditService.record(AuditEventType.PASSWORD_DELETED, userId, ip, userAgent, "Credential '" + credential.getTitle() + "' deleted");
     }
 
     @Transactional(readOnly = true)
-    public CredentialPasswordResponse revealPassword(UUID userId, UUID id) {
+    public CredentialPasswordResponse revealPassword(UUID userId, UUID id, String ip, String userAgent) {
         Credential credential = findOwnedOrThrow(id, userId);
+        auditService.record(AuditEventType.PASSWORD_VIEWED, userId, ip, userAgent, "Credential '" + credential.getTitle() + "' password viewed");
         return new CredentialPasswordResponse(encryptionService.decrypt(credential.getEncryptedPassword()));
     }
 

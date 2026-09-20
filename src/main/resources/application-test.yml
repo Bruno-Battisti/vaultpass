@@ -11,6 +11,13 @@ security:
   encryption:
     # Test-only fixture, not a real secret. Never used outside the test profile.
     master-key: du7RQvgVkC26cuc13qyVzIL/DNzVoLiDv7fferEOp80=
+  # Disabled in tests: IT test classes share one Spring context (and thus one
+  # rate-limit bucket cache) across many @Test methods that all hit /auth/login
+  # from the same synthetic IP, which would make unrelated tests start
+  # failing with 429 once the shared per-IP bucket runs dry. The limiter's
+  # own logic is covered directly by RateLimitingFilterTest instead.
+  rate-limit:
+    enabled: false
 
 logging:
   level:

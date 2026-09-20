@@ -38,9 +38,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String token = header.substring(BEARER_PREFIX.length());
             try {
                 Claims claims = jwtService.parseClaims(token);
-                if (!jwtService.isRefreshToken(claims)) {
-                    authenticate(claims, request);
-                }
+                authenticate(claims, request);
             } catch (JwtException | IllegalArgumentException ex) {
                 log.debug("Rejected invalid JWT: {}", ex.getMessage());
                 SecurityContextHolder.clearContext();

@@ -1,0 +1,13 @@
+package com.vaultpass.entity;
+
+public enum AuditEventType {
+    LOGIN_SUCCESS,
+    LOGIN_FAILED,
+    LOGOUT,
+    PASSWORD_CREATED,
+    PASSWORD_UPDATED,
+    PASSWORD_DELETED,
+    PASSWORD_VIEWED,
+    ACCOUNT_LOCKED,
+    TOKEN_REUSE_DETECTED
+}

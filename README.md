@@ -10,7 +10,7 @@ API REST de gerenciamento seguro de senhas em Java + Spring Boot, com cofre priv
 - [x] Cadastro, login e JWT (Fase 2)
 - [x] Cofre de credenciais (CRUD + criptografia AES-256-GCM) (Fase 3)
 - [x] Categorias, gerador de senhas e busca (Fase 4)
-- [ ] Refresh token persistido, rate limiting e auditoria (Fase 5)
+- [x] Refresh token persistido, rate limiting e auditoria (Fase 5)
 - [ ] 2FA (TOTP), sessões e detecção de atividade suspeita (Fase 6)
 - [ ] Deploy, CI/CD e documentação final (Fase 7)
 
@@ -75,7 +75,7 @@ curl -X POST http://localhost:8080/api/v1/auth/refresh \
   -d '{"refreshToken":"<refresh-token-do-login>"}'
 ```
 
-A senha mestra exige no mínimo 12 caracteres com maiúscula, minúscula, número e símbolo. O `access_token` dura 15 minutos; o `refresh_token` (ainda stateless nesta fase — persistência e rotação chegam na Fase 5) dura 7 dias.
+A senha mestra exige no mínimo 12 caracteres com maiúscula, minúscula, número e símbolo. O `access_token` dura 15 minutos; o `refresh_token` dura 7 dias, é opaco (não é JWT), persistido como hash SHA-256 e **rotacionado a cada uso** — reutilizar um refresh token já trocado é tratado como roubo de sessão e revoga todos os tokens ativos daquele usuário.
 
 ### Vault (Fase 3)
 
@@ -134,6 +134,21 @@ curl -X POST http://localhost:8080/api/v1/password/strength -H "Authorization: B
 # Buscar no cofre por título/usuário e/ou filtrar por categoria
 curl -H "Authorization: Bearer <token>" "http://localhost:8080/api/v1/vault?search=github&categoryId={id}"
 ```
+
+### Segurança avançada (Fase 5)
+
+```bash
+# Logout (revoga o refresh token; funciona so com posse do proprio token, sem precisar do access token)
+curl -X POST http://localhost:8080/api/v1/auth/logout -H "Content-Type: application/json" \
+  -d '{"refreshToken":"<refresh-token>"}'
+
+# Historico de atividade da propria conta (login, logout, criacao/edicao/exclusao/visualizacao de credenciais etc.)
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/security/activity
+```
+
+- **Rate limiting** por IP: `/auth/login` 5/min, `/auth/register` 3/hora, `/auth/refresh` 20/min — excedeu, `429` com header `Retry-After`. Desativado no profile de testes (evita interferência entre casos de teste que compartilham o mesmo contexto Spring).
+- **Lockout de conta**: 5 tentativas de login incorretas seguidas bloqueiam a conta por 15 minutos (`423 Locked`), mesmo com a senha correta.
+- **Auditoria assíncrona**: eventos `LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGOUT`, `PASSWORD_CREATED/UPDATED/DELETED/VIEWED`, `ACCOUNT_LOCKED`, `TOKEN_REUSE_DETECTED` gravados em background, consultáveis apenas pelo próprio usuário via `/security/activity`.
 
 ## Security
 
