@@ -13,14 +13,18 @@ import javax.crypto.SecretKey;
 import org.springframework.stereotype.Service;
 
 /**
- * Issues and validates access tokens only. Refresh tokens are opaque,
- * persisted, single-use values managed by RefreshTokenService — not JWTs —
- * so a refresh token can never be mistaken for a valid access token here.
+ * Issues and validates access tokens, plus short-lived 2FA challenge
+ * tokens. Refresh tokens are opaque, persisted, single-use values managed
+ * by RefreshTokenService — not JWTs — so a refresh token can never be
+ * mistaken for a valid access token here.
  */
 @Service
 public class JwtService {
 
     private static final int MIN_KEY_BYTES = 32;
+    private static final String CLAIM_PURPOSE = "purpose";
+    private static final String PURPOSE_2FA_CHALLENGE = "2fa-challenge";
+    private static final Duration CHALLENGE_TOKEN_TTL = Duration.ofMinutes(5);
 
     private final JwtProperties properties;
     private final SecretKey signingKey;
@@ -46,6 +50,27 @@ public class JwtService {
                 .expiration(Date.from(now.plus(ttl)))
                 .signWith(signingKey)
                 .compact();
+    }
+
+    /**
+     * Proves the password step of login already succeeded, without granting
+     * API access: it carries no role/authorities and is only ever accepted
+     * by /auth/2fa/verify (see isChallengeToken, used by JwtAuthenticationFilter
+     * to refuse it everywhere else).
+     */
+    public String generateChallengeToken(UUID userId) {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .subject(userId.toString())
+                .claim(CLAIM_PURPOSE, PURPOSE_2FA_CHALLENGE)
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plus(CHALLENGE_TOKEN_TTL)))
+                .signWith(signingKey)
+                .compact();
+    }
+
+    public boolean isChallengeToken(Claims claims) {
+        return PURPOSE_2FA_CHALLENGE.equals(claims.get(CLAIM_PURPOSE, String.class));
     }
 
     public long getAccessTokenExpirationSeconds() {

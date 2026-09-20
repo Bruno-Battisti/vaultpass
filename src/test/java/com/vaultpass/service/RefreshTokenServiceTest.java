@@ -65,10 +65,20 @@ class RefreshTokenServiceTest {
     @Test
     void issue_persistsOnlyTheHashOfTheRawToken() {
         UUID userId = UUID.randomUUID();
+        UUID generatedId = UUID.randomUUID();
+        // Simulates Hibernate's client-side UUID generation, which assigns the
+        // id synchronously on save() — a plain mock wouldn't do that itself.
+        when(refreshTokenRepository.save(any(RefreshToken.class))).thenAnswer(inv -> {
+            RefreshToken token = inv.getArgument(0);
+            token.setId(generatedId);
+            return token;
+        });
 
-        String rawToken = refreshTokenService.issue(userId, "203.0.113.5", "junit");
+        RefreshTokenService.IssuedToken issued = refreshTokenService.issue(userId, "203.0.113.5", "junit");
+        String rawToken = issued.rawToken();
 
         assertThat(rawToken).isNotBlank();
+        assertThat(issued.tokenId()).isEqualTo(generatedId);
         ArgumentCaptor<RefreshToken> captor = ArgumentCaptor.forClass(RefreshToken.class);
         verify(refreshTokenRepository).save(captor.capture());
         assertThat(captor.getValue().getTokenHash()).isNotEqualTo(rawToken).isEqualTo(sha256Base64(rawToken));

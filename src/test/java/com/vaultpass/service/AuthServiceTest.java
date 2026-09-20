@@ -62,6 +62,15 @@ class AuthServiceTest {
     private RefreshTokenService refreshTokenService;
 
     @Mock
+    private UserSessionService userSessionService;
+
+    @Mock
+    private TwoFactorAuthService twoFactorAuthService;
+
+    @Mock
+    private SuspiciousActivityDetector suspiciousActivityDetector;
+
+    @Mock
     private AuditService auditService;
 
     private AuthService authService;
@@ -70,8 +79,12 @@ class AuthServiceTest {
     void setUp() {
         when(passwordEncoder.encode(anyString())).thenReturn("dummy-hash");
         authService = new AuthService(userRepository, passwordEncoder, jwtService, userMapper, categoryService,
-                refreshTokenService, auditService);
+                refreshTokenService, userSessionService, twoFactorAuthService, suspiciousActivityDetector, auditService);
         ReflectionTestUtils.invokeMethod(authService, "init");
+    }
+
+    private static AuthResponse asSuccess(LoginResult result) {
+        return ((LoginResult.Success) result).authResponse();
     }
 
     @Test
@@ -112,9 +125,10 @@ class AuthServiceTest {
         when(passwordEncoder.matches(request.password(), "hashed")).thenReturn(true);
         when(jwtService.generateAccessToken(user)).thenReturn("access-token");
         when(jwtService.getAccessTokenExpirationSeconds()).thenReturn(900L);
-        when(refreshTokenService.issue(user.getId(), IP, USER_AGENT)).thenReturn("refresh-token");
+        when(refreshTokenService.issue(eq(user.getId()), eq(IP), eq(USER_AGENT)))
+                .thenReturn(new RefreshTokenService.IssuedToken(UUID.randomUUID(), "refresh-token"));
 
-        AuthResponse response = authService.login(request, IP, USER_AGENT);
+        AuthResponse response = asSuccess(authService.login(request, IP, USER_AGENT));
 
         assertThat(response.accessToken()).isEqualTo("access-token");
         assertThat(response.refreshToken()).isEqualTo("refresh-token");
@@ -123,6 +137,27 @@ class AuthServiceTest {
         // Successful login resets the failed-attempts counter.
         assertThat(user.getFailedLoginAttempts()).isZero();
         verify(auditService).record(eq(AuditEventType.LOGIN_SUCCESS), eq(user.getId()), eq(IP), eq(USER_AGENT), anyString());
+        verify(suspiciousActivityDetector).checkAndRecord(user.getId(), IP, USER_AGENT);
+    }
+
+    @Test
+    void login_withTwoFactorEnabled_returnsChallengeInsteadOfTokens() {
+        LoginRequest request = new LoginRequest("bruno@example.com", "SenhaForte123!");
+        User user = User.builder().id(UUID.randomUUID()).email(request.email()).passwordHash("hashed")
+                .enabled(true).build();
+        when(userRepository.findByEmailIgnoreCase(request.email())).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches(request.password(), "hashed")).thenReturn(true);
+        when(twoFactorAuthService.isEnabledForUser(user.getId())).thenReturn(true);
+        when(jwtService.generateChallengeToken(user.getId())).thenReturn("challenge-token");
+
+        LoginResult result = authService.login(request, IP, USER_AGENT);
+
+        assertThat(result).isInstanceOf(LoginResult.TwoFactorRequired.class);
+        LoginResult.TwoFactorRequired challenge = (LoginResult.TwoFactorRequired) result;
+        assertThat(challenge.challenge().twoFactorRequired()).isTrue();
+        assertThat(challenge.challenge().challengeToken()).isEqualTo("challenge-token");
+        verify(refreshTokenService, never()).issue(any(), anyString(), anyString());
+        verify(auditService, never()).record(eq(AuditEventType.LOGIN_SUCCESS), any(), anyString(), anyString(), anyString());
     }
 
     @Test
@@ -175,9 +210,10 @@ class AuthServiceTest {
         when(passwordEncoder.matches(request.password(), "hashed")).thenReturn(true);
         when(jwtService.generateAccessToken(user)).thenReturn("access-token");
         when(jwtService.getAccessTokenExpirationSeconds()).thenReturn(900L);
-        when(refreshTokenService.issue(user.getId(), IP, USER_AGENT)).thenReturn("refresh-token");
+        when(refreshTokenService.issue(eq(user.getId()), eq(IP), eq(USER_AGENT)))
+                .thenReturn(new RefreshTokenService.IssuedToken(UUID.randomUUID(), "refresh-token"));
 
-        AuthResponse response = authService.login(request, IP, USER_AGENT);
+        AuthResponse response = asSuccess(authService.login(request, IP, USER_AGENT));
 
         assertThat(response.accessToken()).isEqualTo("access-token");
     }
@@ -209,9 +245,10 @@ class AuthServiceTest {
     @Test
     void refresh_success() {
         UUID userId = UUID.randomUUID();
+        UUID newTokenId = UUID.randomUUID();
         User user = User.builder().id(userId).enabled(true).build();
         when(refreshTokenService.rotate("valid-refresh", IP, USER_AGENT))
-                .thenReturn(new RefreshTokenService.RotationResult(userId, "new-raw-refresh"));
+                .thenReturn(new RefreshTokenService.RotationResult(userId, newTokenId, "new-raw-refresh"));
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
         when(jwtService.generateAccessToken(user)).thenReturn("new-access");
         when(jwtService.getAccessTokenExpirationSeconds()).thenReturn(900L);
@@ -221,6 +258,7 @@ class AuthServiceTest {
         assertThat(response.accessToken()).isEqualTo("new-access");
         assertThat(response.refreshToken()).isEqualTo("new-raw-refresh");
         assertThat(response.expiresIn()).isEqualTo(900L);
+        verify(userSessionService).record(userId, newTokenId, IP, USER_AGENT);
     }
 
     @Test
@@ -228,7 +266,7 @@ class AuthServiceTest {
         UUID userId = UUID.randomUUID();
         User user = User.builder().id(userId).enabled(false).build();
         when(refreshTokenService.rotate("valid-refresh", IP, USER_AGENT))
-                .thenReturn(new RefreshTokenService.RotationResult(userId, "new-raw-refresh"));
+                .thenReturn(new RefreshTokenService.RotationResult(userId, UUID.randomUUID(), "new-raw-refresh"));
         when(userRepository.findById(userId)).thenReturn(Optional.of(user));
 
         assertThrows(InvalidCredentialsException.class,

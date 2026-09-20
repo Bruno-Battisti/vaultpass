@@ -11,7 +11,7 @@ API REST de gerenciamento seguro de senhas em Java + Spring Boot, com cofre priv
 - [x] Cofre de credenciais (CRUD + criptografia AES-256-GCM) (Fase 3)
 - [x] Categorias, gerador de senhas e busca (Fase 4)
 - [x] Refresh token persistido, rate limiting e auditoria (Fase 5)
-- [ ] 2FA (TOTP), sessões e detecção de atividade suspeita (Fase 6)
+- [x] 2FA (TOTP), sessões e detecção de atividade suspeita (Fase 6)
 - [ ] Deploy, CI/CD e documentação final (Fase 7)
 
 ## Architecture
@@ -148,7 +148,38 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/security/ac
 
 - **Rate limiting** por IP: `/auth/login` 5/min, `/auth/register` 3/hora, `/auth/refresh` 20/min — excedeu, `429` com header `Retry-After`. Desativado no profile de testes (evita interferência entre casos de teste que compartilham o mesmo contexto Spring).
 - **Lockout de conta**: 5 tentativas de login incorretas seguidas bloqueiam a conta por 15 minutos (`423 Locked`), mesmo com a senha correta.
-- **Auditoria assíncrona**: eventos `LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGOUT`, `PASSWORD_CREATED/UPDATED/DELETED/VIEWED`, `ACCOUNT_LOCKED`, `TOKEN_REUSE_DETECTED` gravados em background, consultáveis apenas pelo próprio usuário via `/security/activity`.
+- **Auditoria assíncrona**: eventos `LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGIN_NEW_DEVICE`, `LOGOUT`, `PASSWORD_CREATED/UPDATED/DELETED/VIEWED`, `ACCOUNT_LOCKED`, `TOKEN_REUSE_DETECTED` gravados em background, consultáveis apenas pelo próprio usuário via `/security/activity`.
+
+### 2FA e sessões (Fase 6)
+
+```bash
+# 1. Configurar (retorna o secret e o QR code em base64 — so aparece aqui)
+curl -X POST http://localhost:8080/api/v1/auth/2fa/setup -H "Authorization: Bearer <token>"
+
+# 2. Confirmar com o primeiro codigo do app autenticador (retorna 10 codigos de recuperacao, so aparecem aqui)
+curl -X POST http://localhost:8080/api/v1/auth/2fa/enable -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"code":"123456"}'
+
+# 3. Login passa a devolver um desafio em vez de tokens
+curl -X POST http://localhost:8080/api/v1/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"bruno@example.com","password":"SenhaForte123!"}'
+# -> {"twoFactorRequired":true,"challengeToken":"..."}
+
+# 4. Completar o login com o codigo do app (ou um codigo de recuperacao)
+curl -X POST http://localhost:8080/api/v1/auth/2fa/verify -H "Content-Type: application/json" \
+  -d '{"challengeToken":"<challenge>","code":"123456"}'
+
+# Desabilitar exige a senha mestra novamente
+curl -X POST http://localhost:8080/api/v1/auth/2fa/disable -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"password":"SenhaForte123!"}'
+
+# Sessoes ativas (cada refresh token vira uma "sessao" rotulada por IP/User-Agent)
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/security/sessions
+curl -X DELETE -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/security/sessions/{id}
+curl -X DELETE -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/security/sessions
+```
+
+O `challengeToken` é um JWT de 5 minutos com propósito exclusivo (`purpose: 2fa-challenge`) — nunca é aceito como access token em nenhum outro endpoint. Revogar uma sessão revoga de fato o refresh token associado a ela, não é só cosmético. A detecção de atividade suspeita registra `LOGIN_NEW_DEVICE` quando o IP do login não aparece no histórico recente do usuário.
 
 ## Security
 

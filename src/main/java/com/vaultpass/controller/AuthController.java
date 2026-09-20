@@ -1,12 +1,12 @@
 package com.vaultpass.controller;
 
-import com.vaultpass.dto.auth.AuthResponse;
 import com.vaultpass.dto.auth.LoginRequest;
 import com.vaultpass.dto.auth.RefreshResponse;
 import com.vaultpass.dto.auth.RefreshTokenRequest;
 import com.vaultpass.dto.auth.RegisterRequest;
 import com.vaultpass.dto.auth.UserSummaryResponse;
 import com.vaultpass.service.AuthService;
+import com.vaultpass.service.LoginResult;
 import com.vaultpass.util.ClientIpResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -33,8 +33,12 @@ public class AuthController {
     }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
-        return ResponseEntity.ok(authService.login(request, clientIpResolver.resolve(httpRequest), userAgent(httpRequest)));
+    public ResponseEntity<?> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
+        LoginResult result = authService.login(request, clientIpResolver.resolve(httpRequest), userAgent(httpRequest));
+        return switch (result) {
+            case LoginResult.Success success -> ResponseEntity.ok(success.authResponse());
+            case LoginResult.TwoFactorRequired twoFactorRequired -> ResponseEntity.ok(twoFactorRequired.challenge());
+        };
     }
 
     @PostMapping("/refresh")

@@ -37,11 +37,14 @@ public class RefreshTokenService {
     private final AuditService auditService;
     private final SecureRandom secureRandom = new SecureRandom();
 
-    public record RotationResult(UUID userId, String rawToken) {
+    public record IssuedToken(UUID tokenId, String rawToken) {
+    }
+
+    public record RotationResult(UUID userId, UUID newTokenId, String rawToken) {
     }
 
     @Transactional
-    public String issue(UUID userId, String ip, String userAgent) {
+    public IssuedToken issue(UUID userId, String ip, String userAgent) {
         String rawToken = generateRawToken();
         RefreshToken entity = RefreshToken.builder()
                 .userId(userId)
@@ -50,8 +53,8 @@ public class RefreshTokenService {
                 .createdByIp(ip)
                 .userAgent(userAgent)
                 .build();
-        refreshTokenRepository.save(entity);
-        return rawToken;
+        RefreshToken saved = refreshTokenRepository.save(entity);
+        return new IssuedToken(saved.getId(), rawToken);
     }
 
     // noRollbackFor is required: the reuse-detection branch revokes every
@@ -88,7 +91,7 @@ public class RefreshTokenService {
         existing.setReplacedByTokenId(replacement.getId());
         refreshTokenRepository.save(existing);
 
-        return new RotationResult(existing.getUserId(), newRawToken);
+        return new RotationResult(existing.getUserId(), replacement.getId(), newRawToken);
     }
 
     @Transactional
@@ -98,6 +101,15 @@ public class RefreshTokenService {
             token.setRevokedAt(Instant.now());
             refreshTokenRepository.save(token);
             return token.getUserId();
+        });
+    }
+
+    @Transactional
+    public void revokeById(UUID tokenId) {
+        refreshTokenRepository.findById(tokenId).ifPresent(token -> {
+            token.setRevoked(true);
+            token.setRevokedAt(Instant.now());
+            refreshTokenRepository.save(token);
         });
     }
 

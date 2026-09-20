@@ -1,6 +1,7 @@
 package com.vaultpass.service;
 
 import com.vaultpass.dto.auth.AuthResponse;
+import com.vaultpass.dto.auth.LoginChallengeResponse;
 import com.vaultpass.dto.auth.LoginRequest;
 import com.vaultpass.dto.auth.RefreshResponse;
 import com.vaultpass.dto.auth.RefreshTokenRequest;
@@ -45,6 +46,9 @@ public class AuthService {
     private final UserMapper userMapper;
     private final CategoryService categoryService;
     private final RefreshTokenService refreshTokenService;
+    private final UserSessionService userSessionService;
+    private final TwoFactorAuthService twoFactorAuthService;
+    private final SuspiciousActivityDetector suspiciousActivityDetector;
     private final AuditService auditService;
 
     private String dummyPasswordHash;
@@ -77,7 +81,7 @@ public class AuthService {
     // throw must still be committed — otherwise Spring's default rollback
     // on RuntimeException would silently undo every lockout increment.
     @Transactional(noRollbackFor = InvalidCredentialsException.class)
-    public AuthResponse login(LoginRequest request, String ip, String userAgent) {
+    public LoginResult login(LoginRequest request, String ip, String userAgent) {
         User user = userRepository.findByEmailIgnoreCase(request.email()).orElse(null);
 
         if (user != null && isLocked(user)) {
@@ -102,9 +106,16 @@ public class AuthService {
         user.setFailedLoginAttempts(0);
         user.setLockedUntil(null);
         userRepository.save(user);
-        auditService.record(AuditEventType.LOGIN_SUCCESS, user.getId(), ip, userAgent, "Login successful");
 
-        return buildAuthResponse(user, ip, userAgent);
+        if (twoFactorAuthService.isEnabledForUser(user.getId())) {
+            String challengeToken = jwtService.generateChallengeToken(user.getId());
+            return new LoginResult.TwoFactorRequired(new LoginChallengeResponse(true, challengeToken));
+        }
+
+        auditService.record(AuditEventType.LOGIN_SUCCESS, user.getId(), ip, userAgent, "Login successful");
+        suspiciousActivityDetector.checkAndRecord(user.getId(), ip, userAgent);
+
+        return new LoginResult.Success(buildAuthResponse(user, ip, userAgent));
     }
 
     @Transactional
@@ -114,6 +125,8 @@ public class AuthService {
         User user = userRepository.findById(rotation.userId())
                 .filter(User::isEnabled)
                 .orElseThrow(() -> new InvalidCredentialsException("Invalid or expired refresh token"));
+
+        userSessionService.record(user.getId(), rotation.newTokenId(), ip, userAgent);
 
         return new RefreshResponse(
                 jwtService.generateAccessToken(user), rotation.rawToken(), jwtService.getAccessTokenExpirationSeconds());
@@ -142,7 +155,8 @@ public class AuthService {
 
     private AuthResponse buildAuthResponse(User user, String ip, String userAgent) {
         String accessToken = jwtService.generateAccessToken(user);
-        String refreshToken = refreshTokenService.issue(user.getId(), ip, userAgent);
-        return new AuthResponse(accessToken, refreshToken, "Bearer", jwtService.getAccessTokenExpirationSeconds());
+        RefreshTokenService.IssuedToken issued = refreshTokenService.issue(user.getId(), ip, userAgent);
+        userSessionService.record(user.getId(), issued.tokenId(), ip, userAgent);
+        return new AuthResponse(accessToken, issued.rawToken(), "Bearer", jwtService.getAccessTokenExpirationSeconds());
     }
 }

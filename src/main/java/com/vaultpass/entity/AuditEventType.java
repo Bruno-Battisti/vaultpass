@@ -3,6 +3,7 @@ package com.vaultpass.entity;
 public enum AuditEventType {
     LOGIN_SUCCESS,
     LOGIN_FAILED,
+    LOGIN_NEW_DEVICE,
     LOGOUT,
     PASSWORD_CREATED,
     PASSWORD_UPDATED,

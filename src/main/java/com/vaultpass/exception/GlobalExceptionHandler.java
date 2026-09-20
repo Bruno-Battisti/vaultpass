@@ -50,6 +50,11 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.NOT_FOUND, "No handler found for this request", request, null);
     }
 
+    @ExceptionHandler(InvalidTotpCodeException.class)
+    public ResponseEntity<ApiErrorResponse> handleInvalidTotpCode(InvalidTotpCodeException ex, HttpServletRequest request) {
+        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request, null);
+    }
+
     @ExceptionHandler(InvalidRequestException.class)
     public ResponseEntity<ApiErrorResponse> handleInvalidRequest(InvalidRequestException ex, HttpServletRequest request) {
         return build(HttpStatus.BAD_REQUEST, ex.getMessage(), request, null);
