@@ -4,6 +4,11 @@ spring:
   flyway:
     clean-disabled: false
 
+security:
+  jwt:
+    # Test-only fixture, not a real secret. Never used outside the test profile.
+    secret: JX46218BndVjHZw2F+2ZHAOpK1jlu9HCM9v99m5vQoU=
+
 logging:
   level:
     com.vaultpass: INFO
