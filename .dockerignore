@@ -1,0 +1,17 @@
+# Secrets — never let these into a build context
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+
+# Build output / VCS / IDE noise
+target/
+.git/
+.idea/
+*.iml
+.vscode/
+docs/
+*.md
