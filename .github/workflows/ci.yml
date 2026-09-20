@@ -24,12 +24,14 @@ jobs:
       - name: Build, unit test and integration test
         run: ./mvnw -B verify
 
+      # TEST-*.xml only: failsafe-reports also contains a failsafe-summary.xml
+      # that isn't a per-test JUnit report and breaks this parser.
       - name: Publish test report
         if: always()
         uses: dorny/test-reporter@v1
         with:
           name: Maven Tests
-          path: '**/surefire-reports/*.xml,**/failsafe-reports/*.xml'
+          path: '**/surefire-reports/TEST-*.xml,**/failsafe-reports/TEST-*.xml'
           reporter: java-junit
 
       - name: Upload jar artifact
