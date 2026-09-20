@@ -28,7 +28,7 @@ jobs:
       # that isn't a per-test JUnit report and breaks this parser.
       - name: Publish test report
         if: always()
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v3
         with:
           name: Maven Tests
           path: '**/surefire-reports/TEST-*.xml,**/failsafe-reports/TEST-*.xml'
