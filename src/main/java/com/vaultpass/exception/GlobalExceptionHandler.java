@@ -45,6 +45,17 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.NOT_FOUND, "No handler found for this request", request, null);
     }
 
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleResourceNotFound(ResourceNotFoundException ex, HttpServletRequest request) {
+        return build(HttpStatus.NOT_FOUND, ex.getMessage(), request, null);
+    }
+
+    @ExceptionHandler(EncryptionOperationException.class)
+    public ResponseEntity<ApiErrorResponse> handleEncryptionOperation(EncryptionOperationException ex, HttpServletRequest request) {
+        log.error("Encryption operation failed while processing {}", request.getRequestURI(), ex);
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred", request, null);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiErrorResponse> handleGeneric(Exception ex, HttpServletRequest request) {
         log.error("Unhandled exception while processing {}", request.getRequestURI(), ex);

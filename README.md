@@ -8,7 +8,7 @@ API REST de gerenciamento seguro de senhas em Java + Spring Boot, com cofre priv
 
 - [x] Base de infraestrutura (Fase 1)
 - [x] Cadastro, login e JWT (Fase 2)
-- [ ] Cofre de credenciais (CRUD + criptografia AES-256-GCM) (Fase 3)
+- [x] Cofre de credenciais (CRUD + criptografia AES-256-GCM) (Fase 3)
 - [ ] Categorias, gerador de senhas e busca (Fase 4)
 - [ ] Refresh token persistido, rate limiting e auditoria (Fase 5)
 - [ ] 2FA (TOTP), sessões e detecção de atividade suspeita (Fase 6)
@@ -49,7 +49,7 @@ API sobe em `http://localhost:8080`, Postgres em `localhost:5433` (mapeado para 
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Conexão com o Postgres | Sim |
 | `SPRING_PROFILES_ACTIVE` | Profile ativo (`dev`/`prod`) | Não (default `dev`) |
 | `JWT_SECRET` | Chave HMAC do JWT (≥32 bytes, Base64) | A partir da Fase 2 |
-| `MASTER_ENCRYPTION_KEY` | Chave AES-256 para o cofre (32 bytes, Base64) | A partir da Fase 3 |
+| `MASTER_ENCRYPTION_KEY` | Chave AES-256 para o cofre (32 bytes, Base64) | Sim |
 | `CORS_ALLOWED_ORIGINS` | Origens permitidas no CORS | Não |
 
 ## API Documentation
@@ -76,6 +76,36 @@ curl -X POST http://localhost:8080/api/v1/auth/refresh \
 ```
 
 A senha mestra exige no mínimo 12 caracteres com maiúscula, minúscula, número e símbolo. O `access_token` dura 15 minutos; o `refresh_token` (ainda stateless nesta fase — persistência e rotação chegam na Fase 5) dura 7 dias.
+
+### Vault (Fase 3)
+
+Todos os endpoints exigem `Authorization: Bearer <accessToken>`.
+
+```bash
+# Criar credencial
+curl -X POST http://localhost:8080/api/v1/vault \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"title":"GitHub","username":"bruno","password":"Sup3rS3cret!","url":"https://github.com","notes":"conta principal"}'
+
+# Listar (paginado)
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/vault
+
+# Ver detalhe (sem a senha)
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/vault/{id}
+
+# Revelar a senha em claro (decifra sob demanda)
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/vault/{id}/password
+
+# Atualizar (password null/omitido mantém a senha atual)
+curl -X PUT http://localhost:8080/api/v1/vault/{id} \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"title":"GitHub","username":"bruno","url":"https://github.com","notes":"atualizado"}'
+
+# Excluir
+curl -X DELETE -H "Authorization: Bearer <token>" http://localhost:8080/api/v1/vault/{id}
+```
+
+A senha é cifrada com AES-256-GCM (IV aleatório por registro) antes de ir para o banco — nunca trafega em claro em `GET /vault` ou `GET /vault/{id}`, só no endpoint dedicado `/password`. Tentar acessar a credencial de outro usuário retorna `404` (nunca `403`, para não confirmar a um atacante que o ID existe).
 
 ## Security
 
